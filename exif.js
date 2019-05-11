@@ -373,7 +373,16 @@
             img.iptcdata = iptcdata || {};
             if (EXIF.isXmpEnabled) {
                var xmpdata= findXMPinJPEG(binFile);
-               img.xmpdata = xmpdata || {};               
+               img.xmpdata = xmpdata || {};
+
+               if (xmpdata) {
+                   var guid = ['x:xmpmeta', 'rdf:RDF', 'rdf:Description', '@attributes', 'xmpNote:HasExtendedXMP']
+                       .reduce((xs, x) => (xs && xs[x]) ? xs[x] : null, xmpdata);
+                   if (guid) {
+                       var extendedxmpdata = findExtendedXMPinJPEG(binFile, guid);
+                       img.extendedxmpdata = extendedxmpdata || {};
+                   }
+               }
             }
             if (callback) {
                 callback.call(img);
@@ -886,6 +895,48 @@
                 return xml2Object(domDocument);
             } else{
              offset++;
+            }
+        }
+    }
+
+    function findExtendedXMPinJPEG(file, guid) {
+
+        if (!('DOMParser' in self)) {
+            // console.warn('XML parsing not supported without DOMParser');
+            return;
+        }
+        var dataView = new DataView(file);
+
+        if (debug) console.log("Got file of length " + file.byteLength);
+        if ((dataView.getUint8(0) != 0xFF) || (dataView.getUint8(1) != 0xD8)) {
+            if (debug) console.log("Not a valid JPEG");
+            return false; // not a valid jpeg
+        }
+
+        var offset = 2,
+            length = file.byteLength,
+            dom = new DOMParser();
+
+        var searchWord = "http://ns.adobe.com/xmp/extension/\0" + guid;
+        var extendedXmpString = '';
+        while (offset < (length - searchWord.length)) {
+            if (getStringFromDB(dataView, offset, searchWord.length) === searchWord) {
+                var startOffset = offset - 1;
+                var sectionLength = dataView.getUint16(offset - 2) - 1;
+                var xmpString = getStringFromDB(dataView, startOffset, sectionLength)
+                if (extendedXmpString === '') {
+                    extendedXmpString += xmpString.substring(xmpString.indexOf('<x:xmpmeta'), xmpString.length);
+                } else {
+                    extendedXmpString += xmpString.substring(searchWord.length + 9, xmpString.length);
+                }
+                offset += sectionLength;
+
+                if (extendedXmpString.trim().endsWith('</x:xmpmeta>')) {
+                    var domDocument = dom.parseFromString(extendedXmpString, 'text/xml');
+                    return xml2Object(domDocument);
+                }
+            } else {
+                offset++;
             }
         }
     }
